@@ -1,0 +1,786 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>imagyvec · Imágenes a PNG y SVG</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:ital,wght@0,400;0,500;0,600;1,700&family=Silkscreen:wght@400;700&display=swap" rel="stylesheet">
+<style>
+:root {
+  color-scheme: dark;
+  --bg: #0f0e0e;
+  --surface: #171615;
+  --line: #2c2a28;
+  --text: #f3efe8;
+  --muted: #a09a91;
+  --accent: #fcb21d;
+  --accent-ink: #1a1200;
+  --danger: #ff6a73;
+  --font: "Chakra Petch", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --pixel: "Silkscreen", ui-monospace, "Courier New", monospace;
+  box-sizing: border-box;
+  padding-top: env(safe-area-inset-top, 0px);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+html { scroll-padding-top: env(safe-area-inset-top, 0px); background: var(--bg); }
+*, *::before, *::after { box-sizing: inherit; }
+[hidden] { display: none !important; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 400 15px/1.5 var(--font);
+  -webkit-text-size-adjust: 100%;
+}
+.wrap { max-width: 1080px; margin: 0 auto; padding: 18px 16px 40px; }
+
+/* Cabecera: el logotipo de la marca, en pequeño */
+header { margin-bottom: 20px; }
+.mark { margin: 0; font-size: 30px; line-height: 1.1; font-weight: 400; letter-spacing: 0; }
+.mark .reto { font-family: var(--font); font-style: italic; font-weight: 700; color: #fff; }
+.mark .arena { font-family: var(--pixel); font-weight: 700; color: var(--accent); margin-left: 3px; font-size: 0.92em; }
+.tag { margin: 6px 0 0; color: var(--muted); max-width: 60ch; }
+
+/* Elegir imagen */
+.drop {
+  position: relative;
+  display: block;
+  border: 1px dashed var(--line);
+  border-radius: 6px;
+  padding: 28px 16px;
+  text-align: center;
+  cursor: pointer;
+}
+.drop:hover, .drop.over { border-color: var(--accent); }
+.drop:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
+.drop strong { display: block; font-size: 18px; font-weight: 600; }
+.drop span { display: block; margin-top: 4px; color: var(--muted); }
+.drop input { position: absolute; width: 1px; height: 1px; opacity: 0; }
+.tip { margin: 12px 0 0; color: var(--muted); font-size: 14px; max-width: 70ch; }
+
+/* Espacio de trabajo */
+.work { display: grid; gap: 22px; margin-top: 18px; }
+@media (min-width: 900px) {
+  .work { grid-template-columns: minmax(0, 1.2fr) minmax(320px, 0.8fr); align-items: start; }
+  .stagecol { position: sticky; top: 16px; }
+}
+.bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+.seg button {
+  font: inherit; color: var(--muted); background: transparent; border: 0;
+  padding: 9px 14px; min-height: 40px; cursor: pointer;
+}
+.seg button + button { border-left: 1px solid var(--line); }
+.seg button[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); font-weight: 600; }
+.seg button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+
+.stage {
+  display: grid; place-items: center;
+  min-height: 240px; padding: 12px;
+  border: 1px solid var(--line); border-radius: 6px;
+  overflow: auto;
+}
+.stage.checker { background: conic-gradient(#2b2927 25%, #1d1c1a 0 50%, #2b2927 0 75%, #1d1c1a 0) 0 0 / 16px 16px; }
+.stage.dark { background: #0f0e0e; }
+.stage.light { background: #ffffff; }
+.stage canvas, .stage img { display: block; max-width: 100%; max-height: 62vh; width: auto; height: auto; }
+.stage canvas.pickable { cursor: crosshair; outline: 2px solid var(--accent); outline-offset: 4px; }
+.empty { color: var(--muted); text-align: center; max-width: 34ch; }
+.info { margin: 10px 0 0; color: var(--muted); font-size: 14px; min-height: 21px; }
+
+/* Paneles de control */
+.panel { border-top: 1px solid var(--line); padding: 16px 0 18px; }
+.panel:first-child { border-top: 0; padding-top: 0; }
+.panel h2 { margin: 0 0 12px; font-size: 17px; font-weight: 600; }
+.row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 12px; }
+.ctl { display: grid; grid-template-columns: 1fr auto; gap: 2px 8px; margin-bottom: 12px; }
+.ctl span { color: var(--text); }
+.ctl output { color: var(--muted); font-variant-numeric: tabular-nums; }
+.ctl input[type=range] { grid-column: 1 / -1; width: 100%; margin: 4px 0 0; accent-color: var(--accent); min-height: 28px; }
+.ctl small { grid-column: 1 / -1; color: var(--muted); font-size: 13px; }
+.check { display: flex; gap: 10px; align-items: flex-start; margin-bottom: 12px; cursor: pointer; }
+.check input { accent-color: var(--accent); width: 20px; height: 20px; margin: 1px 0 0; flex: none; }
+.check small { display: block; color: var(--muted); font-size: 13px; }
+input[type=color] { width: 48px; height: 40px; padding: 2px; background: var(--surface); border: 1px solid var(--line); border-radius: 6px; }
+input[type=text], select {
+  font: inherit; color: var(--text); background: var(--surface);
+  border: 1px solid var(--line); border-radius: 6px; padding: 9px 10px; min-height: 40px;
+}
+input[type=text] { width: 100%; }
+.field { display: grid; gap: 4px; margin-bottom: 12px; }
+.field > span { color: var(--text); }
+
+.btn {
+  font: inherit; font-weight: 600; cursor: pointer;
+  min-height: 44px; padding: 0 16px; border-radius: 6px;
+  color: var(--text); background: transparent; border: 1px solid var(--line);
+}
+.btn:hover { border-color: var(--muted); }
+.btn.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+.btn.primary:hover { filter: brightness(1.06); }
+.btn.small { min-height: 40px; padding: 0 12px; font-weight: 500; }
+.btn[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
+.btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.btn:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.btns { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; }
+
+.result { margin: 12px 0 0; color: var(--muted); font-size: 14px; }
+.result b { color: var(--text); font-weight: 600; }
+.result .ok { color: var(--accent); }
+.result .bad { color: var(--danger); }
+details { margin-top: 12px; }
+summary { cursor: pointer; color: var(--muted); min-height: 32px; }
+textarea {
+  width: 100%; min-height: 140px; margin-top: 8px; resize: vertical;
+  font: 12px/1.4 ui-monospace, "Courier New", monospace; color: var(--text);
+  background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 10px;
+}
+.status { min-height: 22px; margin: 14px 0 0; font-size: 14px; color: var(--muted); }
+.status.error { color: var(--danger); }
+.status.ok { color: var(--accent); }
+body.busy { cursor: progress; }
+@media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1 class="mark"><span class="reto">imagy</span><span class="arena">vec</span></h1>
+    <p class="tag">Quita fondos, convierte a PNG y vectoriza a SVG. Todo se procesa en tu dispositivo, sin subir imágenes a ningún servidor.</p>
+  </header>
+
+  <label class="drop" id="drop">
+    <strong>Elegir imagen</strong>
+    <span>JPG, PNG, WebP o SVG. También puedes arrastrarla o pegarla.</span>
+    <input type="file" id="file" accept="image/*">
+  </label>
+  <p class="tip">Para mejores resultados, pide a la IA imágenes con fondo liso, colores planos y sin degradados ni sombras. Así el fondo se quita limpio y el SVG queda liviano.</p>
+
+  <p class="status" id="status" role="status" aria-live="polite"></p>
+
+  <div class="work" id="work" hidden>
+    <div class="stagecol">
+      <div class="bar">
+        <div class="seg" id="tabs" role="group" aria-label="Vista">
+          <button type="button" data-view="orig" aria-pressed="true">Original</button>
+          <button type="button" data-view="res" aria-pressed="false">Resultado</button>
+          <button type="button" data-view="svg" aria-pressed="false">SVG</button>
+        </div>
+        <div class="seg" id="bgs" role="group" aria-label="Fondo de la vista previa">
+          <button type="button" data-bg="checker" aria-pressed="true">Cuadros</button>
+          <button type="button" data-bg="dark" aria-pressed="false">Oscuro</button>
+          <button type="button" data-bg="light" aria-pressed="false">Claro</button>
+        </div>
+      </div>
+      <div class="stage checker" id="stage">
+        <canvas id="cOrig" aria-label="Imagen original"></canvas>
+        <canvas id="cRes" aria-label="Imagen procesada" hidden></canvas>
+        <img id="imgSvg" alt="Vista previa del SVG" hidden>
+        <p class="empty" id="svgEmpty" hidden>Aún no hay SVG. Ajusta las opciones y pulsa Vectorizar.</p>
+      </div>
+      <p class="info" id="info"></p>
+    </div>
+
+    <div class="controls">
+      <section class="panel">
+        <h2>Fondo</h2>
+        <label class="check">
+          <input type="checkbox" id="optBg" checked>
+          <span>Quitar fondo<small id="bgNote">Borra el color del fondo y deja la imagen transparente.</small></span>
+        </label>
+        <div class="row">
+          <input type="color" id="bgColor" value="#ffffff" aria-label="Color del fondo">
+          <button type="button" class="btn small" id="btnAuto">Detectar</button>
+          <button type="button" class="btn small" id="btnPick" aria-pressed="false">Tocar la imagen</button>
+        </div>
+        <label class="ctl"><span>Tolerancia</span><output>40</output>
+          <input type="range" id="tol" min="0" max="120" value="40">
+          <small>Sube el valor si quedan restos del fondo.</small></label>
+        <label class="ctl"><span>Borde suave</span><output>20</output>
+          <input type="range" id="soft" min="0" max="60" value="20">
+          <small>Difumina el contorno para evitar bordes dentados o con halo.</small></label>
+        <label class="check">
+          <input type="checkbox" id="optHoles" checked>
+          <span>Quitar también los huecos interiores<small>Borra el color del fondo dentro de letras y formas. Apágalo si el dibujo tiene zonas de ese mismo color, como ojos blancos sobre fondo blanco.</small></span>
+        </label>
+        <label class="check">
+          <input type="checkbox" id="optCrop" checked>
+          <span>Recortar espacio vacío</span>
+        </label>
+        <label class="ctl"><span>Margen al recortar</span><output>4</output>
+          <input type="range" id="pad" min="0" max="64" value="4"></label>
+      </section>
+
+      <section class="panel">
+        <h2>Vectorizar a SVG</h2>
+        <label class="ctl"><span>Colores</span><output>6</output>
+          <input type="range" id="tColors" min="2" max="32" value="6">
+          <small>Menos colores, archivo más liviano.</small></label>
+        <label class="ctl"><span>Suavizado</span><output>3</output>
+          <input type="range" id="tSmooth" min="1" max="10" value="3">
+          <small>Más alto simplifica las curvas y reduce el peso.</small></label>
+        <label class="ctl"><span>Ignorar detalles pequeños</span><output>8</output>
+          <input type="range" id="tOmit" min="0" max="40" value="8">
+          <small>Descarta manchas menores a este tamaño (en píxeles).</small></label>
+        <label class="ctl"><span>Reducir ruido</span><output>0</output>
+          <input type="range" id="tBlur" min="0" max="5" value="0">
+          <small>Útil en JPG con mucha compresión.</small></label>
+        <label class="ctl"><span>Resolución de trabajo</span><output>800</output>
+          <input type="range" id="tRes" min="200" max="1600" step="100" value="800">
+          <small>Lado mayor en píxeles. Más resolución da más detalle y más peso.</small></label>
+        <label class="check">
+          <input type="checkbox" id="optStroke" checked>
+          <span>Evitar rendijas entre colores<small>Agrega un contorno fino del mismo color. Apágalo si quieres el SVG más liviano.</small></span>
+        </label>
+        <button type="button" class="btn primary" id="btnTrace" style="width:100%">Vectorizar</button>
+        <p class="result" id="svgInfo"></p>
+      </section>
+
+      <section class="panel">
+        <h2>Exportar</h2>
+        <label class="field"><span>Nombre del archivo</span>
+          <input type="text" id="fname" value="imagen" autocomplete="off" spellcheck="false"></label>
+        <label class="field"><span>Tamaño del PNG (lado mayor)</span>
+          <select id="pngSize">
+            <option value="orig">Tamaño original</option>
+            <option value="1024">1024 px</option>
+            <option value="512">512 px</option>
+            <option value="256">256 px</option>
+            <option value="128">128 px</option>
+            <option value="64">64 px</option>
+          </select></label>
+        <div class="btns">
+          <button type="button" class="btn primary" id="btnPng">Descargar PNG</button>
+          <button type="button" class="btn primary" id="btnSvg" disabled>Descargar SVG</button>
+          <button type="button" class="btn" id="btnCopy" disabled>Copiar SVG</button>
+        </div>
+        <details>
+          <summary>Ver código SVG</summary>
+          <textarea id="code" readonly spellcheck="false" aria-label="Código SVG"></textarea>
+        </details>
+      </section>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/imagetracerjs@1.2.6"></script>
+<script>
+/* ===== Núcleo puro (sin DOM) ===== */
+
+/* Detecta el color del fondo mirando el borde de la imagen. img = {width,height,data} RGBA */
+function analyzeBorder(img) {
+  var w = img.width, h = img.height, d = img.data;
+  var bins = new Map(), border = 0, clear = 0;
+  function visit(x, y) {
+    var i = (y * w + x) * 4;
+    border++;
+    if (d[i + 3] < 16) { clear++; return; }
+    var key = ((d[i] >> 4) << 8) | ((d[i + 1] >> 4) << 4) | (d[i + 2] >> 4);
+    var b = bins.get(key);
+    if (!b) { b = [0, 0, 0, 0]; bins.set(key, b); }
+    b[0]++; b[1] += d[i]; b[2] += d[i + 1]; b[3] += d[i + 2];
+  }
+  var x, y;
+  for (x = 0; x < w; x++) { visit(x, 0); if (h > 1) visit(x, h - 1); }
+  for (y = 1; y < h - 1; y++) { visit(0, y); if (w > 1) visit(w - 1, y); }
+  var best = null;
+  bins.forEach(function (b) { if (!best || b[0] > best[0]) best = b; });
+  var bg = best
+    ? [Math.round(best[1] / best[0]), Math.round(best[2] / best[0]), Math.round(best[3] / best[0])]
+    : [255, 255, 255];
+  return { hasAlpha: border > 0 && clear / border > 0.5, bg: bg };
+}
+
+/* Quita el fondo in situ. tol = distancia RGB totalmente transparente; soft = ancho del borde suave.
+   contig = solo el fondo conectado con los bordes de la imagen. */
+function removeBg(img, bg, tol, soft, contig) {
+  var w = img.width, h = img.height, d = img.data, n = w * h;
+  var t0 = tol, t1 = tol + Math.max(soft, 1);
+  var t1sq = t1 * t1;
+  var reach = new Uint8Array(n);
+  function near(p) {
+    var i = p * 4;
+    if (d[i + 3] === 0) return true;
+    var dr = d[i] - bg[0], dg = d[i + 1] - bg[1], db = d[i + 2] - bg[2];
+    return dr * dr + dg * dg + db * db <= t1sq;
+  }
+  var p, x, y;
+  if (contig) {
+    var q = new Int32Array(n), qh = 0, qt = 0;
+    var push = function (p) { if (!reach[p] && near(p)) { reach[p] = 1; q[qt++] = p; } };
+    for (x = 0; x < w; x++) { push(x); push((h - 1) * w + x); }
+    for (y = 0; y < h; y++) { push(y * w); push(y * w + w - 1); }
+    while (qh < qt) {
+      p = q[qh++];
+      x = p % w;
+      if (x > 0) push(p - 1);
+      if (x < w - 1) push(p + 1);
+      if (p >= w) push(p - w);
+      if (p < n - w) push(p + w);
+    }
+  } else {
+    for (p = 0; p < n; p++) if (near(p)) reach[p] = 1;
+  }
+  for (p = 0; p < n; p++) {
+    if (!reach[p]) continue;
+    var i = p * 4;
+    if (d[i + 3] === 0) continue;
+    var dr = d[i] - bg[0], dg = d[i + 1] - bg[1], db = d[i + 2] - bg[2];
+    var dist = Math.sqrt(dr * dr + dg * dg + db * db);
+    var k = (dist - t0) / (t1 - t0);
+    k = k < 0 ? 0 : k > 1 ? 1 : k;
+    if (k === 0) { d[i] = d[i + 1] = d[i + 2] = d[i + 3] = 0; continue; }
+    if (k < 1) {
+      for (var c = 0; c < 3; c++) {
+        var v = (d[i + c] - bg[c] * (1 - k)) / k; /* quita el reflejo del color de fondo */
+        d[i + c] = v < 0 ? 0 : v > 255 ? 255 : v;
+      }
+      d[i + 3] = Math.round(d[i + 3] * k);
+    }
+  }
+  return img;
+}
+
+/* Caja que contiene los píxeles con alpha > thr. null si no hay ninguno. */
+function bboxOf(img, thr) {
+  var w = img.width, h = img.height, d = img.data;
+  var x0 = w, y0 = h, x1 = -1, y1 = -1;
+  for (var y = 0; y < h; y++) {
+    for (var x = 0; x < w; x++) {
+      if (d[(y * w + x) * 4 + 3] > thr) {
+        if (x < x0) x0 = x; if (x > x1) x1 = x;
+        if (y < y0) y0 = y; if (y > y1) y1 = y;
+      }
+    }
+  }
+  return x1 < 0 ? null : { x: x0, y: y0, w: x1 - x0 + 1, h: y1 - y0 + 1 };
+}
+
+function rgbToHex(s) {
+  return s.replace(/rgb\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\)/g, function (m, r, g, b) {
+    return '#' + [r, g, b].map(function (n) { return (+n).toString(16).padStart(2, '0'); }).join('');
+  });
+}
+
+/* Limpia la salida de imagetracerjs: quita capas transparentes, pasa rgb() a hex,
+   une los trazos del mismo color en un solo <path> y devuelve un SVG compacto. */
+function cleanSvg(raw, w, h, stroke) {
+  var groups = new Map(), shapes = 0;
+  var re = /<path\b([^>]*?)\/?>/g, m;
+  while ((m = re.exec(raw))) {
+    var attrs = m[1];
+    var dm = attrs.match(/\sd="([^"]*)"/);
+    if (!dm) continue;
+    var dstr = dm[1].trim();
+    attrs = attrs.replace(dm[0], ' ');
+    attrs = rgbToHex(attrs);
+    var om = attrs.match(/(?:^|\s)opacity="([\d.]+)"/);
+    if (om) {
+      if (parseFloat(om[1]) === 0) continue;
+      attrs = attrs.replace(om[0], ' ');
+    }
+    if (!stroke) {
+      attrs = attrs.replace(/\sstroke="[^"]*"/g, ' ').replace(/\sstroke-width="[^"]*"/g, ' ');
+    }
+    attrs = attrs.replace(/\s+/g, ' ').trim();
+    if (!dstr) continue;
+    var list = groups.get(attrs);
+    if (!list) { list = []; groups.set(attrs, list); }
+    list.push(dstr);
+    shapes += (dstr.match(/M/g) || []).length;
+  }
+  var out = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ' + w + ' ' + h + '">\n';
+  groups.forEach(function (ds, attrs) {
+    out += '<path ' + attrs + ' d="' + ds.join(' ') + '"/>\n';
+  });
+  out += '</svg>\n';
+  return { svg: out, colors: groups.size, shapes: shapes };
+}
+
+if (typeof module !== 'undefined') {
+  module.exports = { analyzeBorder: analyzeBorder, removeBg: removeBg, bboxOf: bboxOf, cleanSvg: cleanSvg, rgbToHex: rgbToHex };
+}
+
+</script>
+<script>
+(function () {
+  'use strict';
+  var $ = function (s) { return document.querySelector(s); };
+  var MAX_SRC = 1600;
+  var S = { src: null, result: null, name: 'imagen', svg: '', svgW: 0, svgH: 0, view: 'orig',
+            pick: false, hasAlpha: false, bg: [255, 255, 255], dl: null, dlReady: false, timer: 0, shown: false,
+            svgInfo: '', stale: false };
+
+  var cOrig = $('#cOrig'), cRes = $('#cRes'), imgSvg = $('#imgSvg'), svgEmpty = $('#svgEmpty');
+
+  function setStatus(msg, kind) {
+    var s = $('#status');
+    s.textContent = msg || '';
+    s.className = 'status' + (kind ? ' ' + kind : '');
+  }
+  function toHex(rgb) {
+    return '#' + rgb.map(function (n) { return Math.round(n).toString(16).padStart(2, '0'); }).join('');
+  }
+  function fromHex(h) {
+    return [parseInt(h.slice(1, 3), 16), parseInt(h.slice(3, 5), 16), parseInt(h.slice(5, 7), 16)];
+  }
+  function newCanvas(w, h) {
+    var c = document.createElement('canvas');
+    c.width = w; c.height = h;
+    return c;
+  }
+  function kb(n) { return (n / 1024).toFixed(1) + ' KB'; }
+
+  /* Valores de los deslizadores */
+  document.querySelectorAll('.ctl input[type=range]').forEach(function (r) {
+    r.addEventListener('input', function () {
+      r.parentElement.querySelector('output').textContent = r.value;
+    });
+  });
+
+  /* ---------- Cargar imagen ---------- */
+  function readImage(file) {
+    return new Promise(function (res, rej) {
+      var fr = new FileReader();
+      fr.onerror = function () { rej(new Error('No se pudo leer el archivo.')); };
+      fr.onload = function () {
+        var im = new Image();
+        im.onload = function () { res(im); };
+        im.onerror = function () { rej(new Error('No se pudo abrir esa imagen.')); };
+        im.src = fr.result;
+      };
+      fr.readAsDataURL(file);
+    });
+  }
+
+  async function loadFile(file) {
+    if (!file || !/^image\//.test(file.type)) {
+      setStatus('Ese archivo no es una imagen. Prueba con JPG, PNG, WebP o SVG.', 'error');
+      return;
+    }
+    setStatus('Abriendo imagen…');
+    try {
+      var im = await readImage(file);
+      var iw = im.naturalWidth || 1024, ih = im.naturalHeight || 1024;
+      var k = Math.min(1, MAX_SRC / Math.max(iw, ih));
+      var w = Math.max(1, Math.round(iw * k)), h = Math.max(1, Math.round(ih * k));
+      var c = newCanvas(w, h);
+      c.getContext('2d', { willReadFrequently: true }).drawImage(im, 0, 0, w, h);
+      S.src = c;
+      S.name = (file.name || 'imagen').replace(/\.[^.]+$/, '').replace(/[^\w\-]+/g, '-').replace(/^-+|-+$/g, '') || 'imagen';
+      $('#fname').value = S.name;
+      S.svg = '';
+      imgSvg.removeAttribute('src');
+      $('#code').value = '';
+      S.svgInfo = ''; S.stale = false; renderSvgInfo();
+      $('#btnSvg').disabled = true;
+      $('#btnCopy').disabled = true;
+
+      var a = analyzeBorder(c.getContext('2d', { willReadFrequently: true }).getImageData(0, 0, w, h));
+      S.hasAlpha = a.hasAlpha;
+      S.bg = a.bg;
+      $('#bgColor').value = toHex(a.bg);
+      $('#optBg').checked = !a.hasAlpha;
+      $('#optBg').disabled = a.hasAlpha;
+      $('#bgNote').textContent = a.hasAlpha
+        ? 'Esta imagen ya tiene fondo transparente.'
+        : 'Borra el color del fondo y deja la imagen transparente.';
+
+      cOrig.width = w; cOrig.height = h;
+      cOrig.getContext('2d').drawImage(c, 0, 0);
+      $('#work').hidden = false;
+      S.shown = false;
+      setView('orig');
+      process();
+      setStatus(k < 1 ? 'Imagen reducida a ' + w + '×' + h + ' px para trabajar con fluidez.' : '');
+      $('#work').scrollIntoView({ block: 'start' });
+    } catch (e) {
+      setStatus(e.message || 'No se pudo abrir la imagen.', 'error');
+    }
+  }
+
+  $('#file').addEventListener('change', function (e) { loadFile(e.target.files[0]); e.target.value = ''; });
+  var drop = $('#drop');
+  ['dragenter', 'dragover'].forEach(function (t) {
+    document.addEventListener(t, function (e) { e.preventDefault(); drop.classList.add('over'); });
+  });
+  ['dragleave', 'drop'].forEach(function (t) {
+    document.addEventListener(t, function (e) { e.preventDefault(); drop.classList.remove('over'); });
+  });
+  document.addEventListener('drop', function (e) {
+    var f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+    if (f) loadFile(f);
+  });
+  document.addEventListener('paste', function (e) {
+    var files = e.clipboardData ? Array.prototype.slice.call(e.clipboardData.files) : [];
+    var f = files.filter(function (x) { return /^image\//.test(x.type); })[0];
+    if (f) loadFile(f);
+  });
+
+  /* ---------- Procesar (quitar fondo + recortar) ---------- */
+  function schedule() {
+    clearTimeout(S.timer);
+    S.timer = setTimeout(process, 140);
+  }
+
+  function process() {
+    if (!S.src) return;
+    var cv = S.src, w = cv.width, h = cv.height;
+    if ($('#optBg').checked && !S.hasAlpha) {
+      var img = cv.getContext('2d', { willReadFrequently: true }).getImageData(0, 0, w, h);
+      removeBg(img, S.bg, +$('#tol').value, +$('#soft').value, !$('#optHoles').checked);
+      var out = newCanvas(w, h);
+      out.getContext('2d').putImageData(img, 0, 0);
+      cv = out;
+    }
+    if ($('#optCrop').checked) {
+      var d = cv.getContext('2d', { willReadFrequently: true }).getImageData(0, 0, cv.width, cv.height);
+      var bb = bboxOf(d, 8);
+      var pad = +$('#pad').value;
+      if (bb) {
+        var c2 = newCanvas(bb.w + pad * 2, bb.h + pad * 2);
+        c2.getContext('2d').drawImage(cv, bb.x, bb.y, bb.w, bb.h, pad, pad, bb.w, bb.h);
+        cv = c2;
+      }
+    }
+    S.result = cv;
+    cRes.width = cv.width; cRes.height = cv.height;
+    var ctx = cRes.getContext('2d');
+    ctx.clearRect(0, 0, cv.width, cv.height);
+    ctx.drawImage(cv, 0, 0);
+    if (S.svg) { S.stale = true; renderSvgInfo(); }
+    if (S.view === 'svg' && !S.svg) setView('res');
+    if (!S.shown && $('#optBg').checked && !S.hasAlpha) { S.shown = true; setView('res'); }
+    updateInfo();
+  }
+
+  /* ---------- Vistas ---------- */
+  function setView(v) {
+    S.view = v;
+    document.querySelectorAll('#tabs button').forEach(function (b) {
+      b.setAttribute('aria-pressed', String(b.dataset.view === v));
+    });
+    cOrig.hidden = v !== 'orig';
+    cRes.hidden = v !== 'res';
+    imgSvg.hidden = !(v === 'svg' && S.svg);
+    svgEmpty.hidden = !(v === 'svg' && !S.svg);
+    if (v !== 'orig') setPick(false);
+    updateInfo();
+  }
+  document.querySelectorAll('#tabs button').forEach(function (b) {
+    b.addEventListener('click', function () { setView(b.dataset.view); });
+  });
+  document.querySelectorAll('#bgs button').forEach(function (b) {
+    b.addEventListener('click', function () {
+      $('#stage').className = 'stage ' + b.dataset.bg;
+      document.querySelectorAll('#bgs button').forEach(function (x) {
+        x.setAttribute('aria-pressed', String(x === b));
+      });
+    });
+  });
+
+  function renderSvgInfo() {
+    $('#svgInfo').innerHTML = S.svg
+      ? S.svgInfo + (S.stale ? ' <span class="bad">La imagen cambió: vuelve a vectorizar.</span>' : '')
+      : '';
+  }
+
+  function updateInfo() {
+    var t = '';
+    if (S.view === 'orig' && S.src) {
+      t = 'Original · ' + S.src.width + '×' + S.src.height + ' px' + (S.pick ? ' · toca el color del fondo' : '');
+    } else if (S.view === 'res' && S.result) {
+      t = 'Resultado · ' + S.result.width + '×' + S.result.height + ' px · PNG con transparencia';
+    } else if (S.view === 'svg' && S.svg) {
+      t = 'SVG · ' + S.svgW + '×' + S.svgH + ' · ' + kb(new Blob([S.svg]).size);
+    }
+    $('#info').textContent = t;
+  }
+
+  /* ---------- Controles de fondo ---------- */
+  ['tol', 'soft', 'pad'].forEach(function (id) { $('#' + id).addEventListener('input', schedule); });
+  ['optBg', 'optHoles', 'optCrop'].forEach(function (id) { $('#' + id).addEventListener('change', function () {
+    if (id === 'optBg' && this.checked) S.shown = false;
+    process();
+  }); });
+  $('#bgColor').addEventListener('input', function () { S.bg = fromHex(this.value); $('#optBg').checked = true; schedule(); });
+  $('#btnAuto').addEventListener('click', function () {
+    if (!S.src) return;
+    var w = S.src.width, h = S.src.height;
+    var a = analyzeBorder(S.src.getContext('2d', { willReadFrequently: true }).getImageData(0, 0, w, h));
+    S.bg = a.bg; $('#bgColor').value = toHex(a.bg);
+    if (!S.hasAlpha) $('#optBg').checked = true;
+    process();
+  });
+  function setPick(on) {
+    S.pick = on;
+    $('#btnPick').setAttribute('aria-pressed', String(on));
+    cOrig.classList.toggle('pickable', on);
+    if (on) { setView('orig'); }
+    updateInfo();
+  }
+  $('#btnPick').addEventListener('click', function () { setPick(!S.pick); });
+  cOrig.addEventListener('click', function (e) {
+    if (!S.pick) return;
+    var r = cOrig.getBoundingClientRect();
+    var x = Math.min(cOrig.width - 1, Math.max(0, Math.floor((e.clientX - r.left) * cOrig.width / r.width)));
+    var y = Math.min(cOrig.height - 1, Math.max(0, Math.floor((e.clientY - r.top) * cOrig.height / r.height)));
+    var px = cOrig.getContext('2d', { willReadFrequently: true }).getImageData(x, y, 1, 1).data;
+    if (px[3] < 16) { setStatus('Ese punto ya es transparente. Toca un punto del fondo.', 'error'); return; }
+    setStatus('');
+    S.bg = [px[0], px[1], px[2]];
+    $('#bgColor').value = toHex(S.bg);
+    $('#optBg').checked = true;
+    S.shown = false;
+    setPick(false);
+    process();
+  });
+
+  /* ---------- Vectorizar ---------- */
+  function trace() {
+    if (!S.result) return;
+    if (typeof ImageTracer === 'undefined') {
+      setStatus('No se cargó la librería de vectorizado (imagetracerjs). Revisa tu conexión y recarga la página.', 'error');
+      return;
+    }
+    var btn = $('#btnTrace');
+    btn.disabled = true; btn.textContent = 'Vectorizando…';
+    document.body.classList.add('busy');
+    setStatus('');
+    setTimeout(function () {
+      try {
+        var res = S.result;
+        var maxDim = +$('#tRes').value;
+        var k = Math.min(1, maxDim / Math.max(res.width, res.height));
+        var w = Math.max(1, Math.round(res.width * k)), h = Math.max(1, Math.round(res.height * k));
+        var c = newCanvas(w, h);
+        var x = c.getContext('2d', { willReadFrequently: true });
+        x.drawImage(res, 0, 0, w, h);
+        var id = x.getImageData(0, 0, w, h), dd = id.data, hasT = false;
+        for (var i = 0; i < dd.length; i += 4) {
+          if (dd[i + 3] < 128) { dd[i] = dd[i + 1] = dd[i + 2] = dd[i + 3] = 0; hasT = true; }
+          else dd[i + 3] = 255;
+        }
+        var lvl = +$('#tSmooth').value;
+        var stroke = $('#optStroke').checked;
+        var opts = {
+          numberofcolors: +$('#tColors').value + (hasT ? 1 : 0),
+          colorsampling: 2, colorquantcycles: 3, mincolorratio: 0,
+          ltres: 0.35 * lvl, qtres: 0.35 * lvl,
+          pathomit: +$('#tOmit').value,
+          rightangleenhance: true,
+          blurradius: +$('#tBlur').value, blurdelta: 20,
+          strokewidth: stroke ? 1 : 0,
+          roundcoords: 1, viewbox: true, desc: false, linefilter: false, scale: 1
+        };
+        var raw = ImageTracer.imagedataToSVG(id, opts);
+        var out = cleanSvg(raw, w, h, stroke);
+        S.svg = out.svg; S.svgW = w; S.svgH = h;
+        var size = new Blob([out.svg]).size;
+        imgSvg.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(
+          out.svg.replace('<svg ', '<svg width="' + w + '" height="' + h + '" '));
+        $('#code').value = out.svg;
+        var over = size > 50 * 1024;
+        S.svgInfo = '<b>' + kb(size) + '</b> · ' + out.colors + ' colores · ' + out.shapes + ' formas · ' +
+          (over ? '<span class="bad">supera los 50 KB. Baja los colores o sube el suavizado.</span>'
+                : '<span class="ok">dentro del límite de 50 KB</span>');
+        S.stale = false;
+        renderSvgInfo();
+        $('#btnSvg').disabled = false;
+        $('#btnCopy').disabled = false;
+        setView('svg');
+      } catch (e) {
+        setStatus('No se pudo vectorizar: ' + (e && e.message ? e.message : e), 'error');
+      } finally {
+        btn.disabled = false; btn.textContent = 'Vectorizar';
+        document.body.classList.remove('busy');
+      }
+    }, 30);
+  }
+  $('#btnTrace').addEventListener('click', trace);
+
+  /* ---------- Exportar ---------- */
+  function baseName() {
+    return ($('#fname').value || 'imagen').trim().replace(/\.(png|svg)$/i, '').replace(/[^\w\-.]+/g, '-') || 'imagen';
+  }
+  async function saveFile(filename, data) {
+    if (!S.dl && window.claude && !S.dlReady) {
+      setStatus('Preparando las descargas. Vuelve a pulsar en un momento.');
+      return;
+    }
+    if (!S.dl && window.claude) {
+      setStatus('Las descargas no están disponibles en esta vista. Usa "Copiar SVG" o "Ver código SVG".', 'error');
+      return;
+    }
+    if (S.dl) {
+      try {
+        await S.dl.save({ filename: filename, data: data });
+        setStatus('Listo: ' + filename, 'ok');
+      } catch (e) {
+        if (e && e.code === 'declined') return;
+        setStatus('No se pudo guardar el archivo (' + ((e && e.code) || 'error') + ').', 'error');
+      }
+      return;
+    }
+    /* Fuera de Claude (por ejemplo, la página abierta desde tu propio sitio) sirve la descarga normal */
+    try {
+      var blob = data instanceof Blob ? data : new Blob([data]);
+      var url = URL.createObjectURL(blob);
+      var a = document.createElement('a');
+      a.href = url; a.download = filename;
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(function () { URL.revokeObjectURL(url); }, 4000);
+      setStatus('Descarga iniciada: ' + filename, 'ok');
+    } catch (e) {
+      setStatus('La descarga no está disponible aquí. Usa "Copiar SVG" o "Ver código SVG".', 'error');
+    }
+  }
+
+  $('#btnPng').addEventListener('click', function () {
+    if (!S.result) return;
+    var c = S.result, size = $('#pngSize').value;
+    if (size !== 'orig') {
+      var k = (+size) / Math.max(c.width, c.height);
+      var w = Math.max(1, Math.round(c.width * k)), h = Math.max(1, Math.round(c.height * k));
+      var c2 = newCanvas(w, h), g = c2.getContext('2d');
+      g.imageSmoothingQuality = 'high';
+      g.drawImage(c, 0, 0, w, h);
+      c = c2;
+    }
+    c.toBlob(function (blob) {
+      if (!blob) { setStatus('No se pudo crear el PNG.', 'error'); return; }
+      saveFile(baseName() + '.png', blob);
+    }, 'image/png');
+  });
+  $('#btnSvg').addEventListener('click', function () {
+    if (S.svg) saveFile(baseName() + '.svg', S.svg);
+  });
+  $('#btnCopy').addEventListener('click', async function () {
+    if (!S.svg) return;
+    try {
+      await navigator.clipboard.writeText(S.svg);
+      setStatus('SVG copiado.', 'ok');
+    } catch (e) {
+      var t = $('#code');
+      t.closest('details').open = true;
+      t.focus(); t.select();
+      try { document.execCommand('copy'); setStatus('SVG copiado.', 'ok'); }
+      catch (e2) { setStatus('Selecciona el código y cópialo manualmente.', 'error'); }
+    }
+  });
+
+  /* Descargas dentro de Claude: se activan cuando el visor responde */
+  (async function () {
+    try {
+      if (window.claude && typeof window.claude.use === 'function') {
+        S.dl = await window.claude.use('downloads');
+      }
+    } catch (e) { S.dl = null; }
+    S.dlReady = true;
+  })();
+})();
+</script>
+</body>
+</html>
