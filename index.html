@@ -262,6 +262,13 @@ body.busy { cursor: progress; }
           <span>Quitar también los huecos interiores<small>Borra el color del fondo dentro de letras y formas. Apágalo si el dibujo tiene zonas de ese mismo color, como ojos blancos sobre fondo blanco.</small></span>
         </label>
         <label class="check">
+          <input type="checkbox" id="optDefringe">
+          <span>Limpiar bordes oscuros<small>Repinta el contorno de cada forma con el color de su interior. Quita el halo oscuro que deja el fondo anterior, sin tocar el resto.</small></span>
+        </label>
+        <label class="ctl"><span>Grosor del borde a limpiar</span><output>2</output>
+          <input type="range" id="fringe" min="1" max="6" value="2">
+          <small>Píxeles desde el borde hacia adentro. Empieza en 2 y sube si queda halo.</small></label>
+        <label class="check">
           <input type="checkbox" id="optCrop" checked>
           <span>Recortar espacio vacío</span>
         </label>
@@ -495,8 +502,52 @@ function cleanSvg(raw, w, h, stroke) {
   return { svg: out, colors: groups.size, shapes: shapes };
 }
 
+/* Repinta el contorno de cada forma (los r píxeles pegados a lo transparente) con el color de su interior.
+   Quita el halo oscuro que deja un fondo anterior. Modifica img en el sitio. */
+function defringe(img, r) {
+  var w = img.width, h = img.height, d = img.data, n = w * h;
+  var UNSET = 255;
+  var dist = new Uint8Array(n).fill(UNSET);
+  var q = new Int32Array(n), qh = 0, qt = 0, p, k, nb;
+  for (p = 0; p < n; p++) if (d[p * 4 + 3] < 128) { dist[p] = 0; q[qt++] = p; }
+  if (qt === 0 || qt === n) return img;
+  function neighbors(p) {
+    var x = p % w, out = [];
+    if (x > 0) out.push(p - 1);
+    if (x < w - 1) out.push(p + 1);
+    if (p >= w) out.push(p - w);
+    if (p < n - w) out.push(p + w);
+    return out;
+  }
+  while (qh < qt) {
+    p = q[qh++];
+    var dp = dist[p];
+    if (dp > r) continue;
+    nb = neighbors(p);
+    for (k = 0; k < nb.length; k++) {
+      if (dist[nb[k]] === UNSET) { dist[nb[k]] = dp + 1; q[qt++] = nb[k]; }
+    }
+  }
+  var done = new Uint8Array(n);
+  qh = 0; qt = 0;
+  for (p = 0; p < n; p++) if (dist[p] === r + 1) q[qt++] = p;
+  while (qh < qt) {
+    p = q[qh++];
+    nb = neighbors(p);
+    for (k = 0; k < nb.length; k++) {
+      var m = nb[k];
+      if (dist[m] >= 1 && dist[m] <= r && !done[m]) {
+        done[m] = 1;
+        d[m * 4] = d[p * 4]; d[m * 4 + 1] = d[p * 4 + 1]; d[m * 4 + 2] = d[p * 4 + 2];
+        q[qt++] = m;
+      }
+    }
+  }
+  return img;
+}
+
 if (typeof module !== 'undefined') {
-  module.exports = { analyzeBorder: analyzeBorder, removeBg: removeBg, bboxOf: bboxOf, cleanSvg: cleanSvg, rgbToHex: rgbToHex };
+  module.exports = { defringe: defringe, analyzeBorder: analyzeBorder, removeBg: removeBg, bboxOf: bboxOf, cleanSvg: cleanSvg, rgbToHex: rgbToHex };
 }
 
 </script>
@@ -631,6 +682,13 @@ if (typeof module !== 'undefined') {
       out.getContext('2d').putImageData(img, 0, 0);
       cv = out;
     }
+    if ($('#optDefringe').checked) {
+      var fd = cv.getContext('2d', { willReadFrequently: true }).getImageData(0, 0, cv.width, cv.height);
+      defringe(fd, +$('#fringe').value);
+      var fc = newCanvas(cv.width, cv.height);
+      fc.getContext('2d').putImageData(fd, 0, 0);
+      cv = fc;
+    }
     if ($('#optCrop').checked) {
       var d = cv.getContext('2d', { willReadFrequently: true }).getImageData(0, 0, cv.width, cv.height);
       var bb = bboxOf(d, 8);
@@ -702,8 +760,8 @@ if (typeof module !== 'undefined') {
   }
 
   /* ---------- Controles de fondo ---------- */
-  ['tol', 'soft', 'pad'].forEach(function (id) { $('#' + id).addEventListener('input', schedule); });
-  ['optBg', 'optHoles', 'optCrop'].forEach(function (id) { $('#' + id).addEventListener('change', function () {
+  ['tol', 'soft', 'pad', 'fringe'].forEach(function (id) { $('#' + id).addEventListener('input', schedule); });
+  ['optBg', 'optHoles', 'optCrop', 'optDefringe'].forEach(function (id) { $('#' + id).addEventListener('change', function () {
     if (id === 'optBg' && this.checked) S.shown = false;
     process();
   }); });
@@ -806,8 +864,8 @@ if (typeof module !== 'undefined') {
   $('#btnTrace').addEventListener('click', trace);
 
   /* ---------- Historial: deshacer, rehacer y reiniciar ---------- */
-  var IDS_RANGE = ['tol', 'soft', 'pad', 'tColors', 'tSmooth', 'tOmit', 'tBlur', 'tRes'];
-  var IDS_CHECK = ['optBg', 'optHoles', 'optCrop', 'optStroke'];
+  var IDS_RANGE = ['tol', 'soft', 'pad', 'fringe', 'tColors', 'tSmooth', 'tOmit', 'tBlur', 'tRes'];
+  var IDS_CHECK = ['optBg', 'optHoles', 'optCrop', 'optDefringe', 'optStroke'];
 
   function previewUrl(svg, w, h) {
     return 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(
