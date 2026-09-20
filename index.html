@@ -144,6 +144,55 @@ textarea {
 .status.ok { color: var(--accent); }
 body.busy { cursor: progress; }
 @media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; } }
+
+/* Botón para ampliar la vista previa */
+.stagewrap { position: relative; }
+.expand {
+  position: absolute; top: 8px; right: 8px; z-index: 3;
+  width: 44px; height: 44px; display: grid; place-items: center;
+  color: var(--text); background: rgba(15, 14, 14, 0.8);
+  border: 1px solid var(--line); border-radius: 6px; cursor: pointer; padding: 0;
+}
+.expand:hover { border-color: var(--accent); }
+.expand:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* Visor ampliado: zoom, desplazamiento y comparación */
+.viewer { position: fixed; inset: 0; z-index: 100; background: var(--bg); display: flex; flex-direction: column; }
+.vbar {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 10px; padding-top: calc(8px + env(safe-area-inset-top, 0px));
+  border-bottom: 1px solid var(--line);
+}
+.vbar .seg { flex: 1 1 auto; min-width: 0; }
+.vbar .seg button { flex: 1 1 auto; padding: 8px 6px; }
+.vclose { flex: none; width: 44px; height: 44px; display: grid; place-items: center; padding: 0; min-height: 44px; }
+.vzoom { flex: none; min-width: 52px; text-align: right; color: var(--muted); font-variant-numeric: tabular-nums; font-size: 14px; }
+.vstage { position: relative; flex: 1 1 auto; overflow: hidden; touch-action: none; cursor: grab; user-select: none; -webkit-user-select: none; }
+.vstage:active { cursor: grabbing; }
+.vstage.checker { background: conic-gradient(#2b2927 25%, #1d1c1a 0 50%, #2b2927 0 75%, #1d1c1a 0) 0 0 / 16px 16px; }
+.vstage.dark { background: #000; }
+.vstage.light { background: #fff; }
+.vcontent { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
+.vcontent > * { position: absolute; left: 0; top: 0; display: block; max-width: none; max-height: none; }
+.vmsg {
+  position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%);
+  max-width: 90%; padding: 8px 12px; border-radius: 6px; font-size: 14px; text-align: center;
+  color: var(--text); background: rgba(15, 14, 14, 0.92); border: 1px solid var(--line);
+}
+.vfoot {
+  padding: 8px 10px calc(8px + env(safe-area-inset-bottom, 0px));
+  border-top: 1px solid var(--line); display: grid; gap: 8px;
+}
+.vcmp { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; }
+.vcmp .ctl { flex: 1 1 200px; margin: 0; }
+.vcmp .check { margin: 0; }
+.vtools { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.vtools .seg { flex: none; }
+.vtools .seg button { padding: 0; width: 44px; min-height: 40px; display: grid; place-items: center; }
+.sw { display: block; width: 20px; height: 20px; border: 1px solid var(--muted); border-radius: 3px; }
+.sw.checker { background: conic-gradient(#8a8784 25%, #3a3836 0 50%, #8a8784 0 75%, #3a3836 0) 0 0 / 8px 8px; }
+.sw.dark { background: #000; }
+.sw.light { background: #fff; }
 </style>
 </head>
 <body>
@@ -176,11 +225,16 @@ body.busy { cursor: progress; }
           <button type="button" data-bg="light" aria-pressed="false">Claro</button>
         </div>
       </div>
+      <div class="stagewrap">
+      <button type="button" class="expand" id="btnExpand" aria-label="Ampliar la vista previa" title="Ampliar">
+        <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg>
+      </button>
       <div class="stage checker" id="stage">
         <canvas id="cOrig" aria-label="Imagen original"></canvas>
         <canvas id="cRes" aria-label="Imagen procesada" hidden></canvas>
         <img id="imgSvg" alt="Vista previa del SVG" hidden>
         <p class="empty" id="svgEmpty" hidden>Aún no hay SVG. Ajusta las opciones y pulsa Vectorizar.</p>
+      </div>
       </div>
       <p class="info" id="info"></p>
     </div>
@@ -268,6 +322,41 @@ body.busy { cursor: progress; }
           <textarea id="code" readonly spellcheck="false" aria-label="Código SVG"></textarea>
         </details>
       </section>
+    </div>
+  </div>
+</div>
+
+
+<div class="viewer" id="viewer" role="dialog" aria-modal="true" aria-label="Visor ampliado" hidden>
+  <div class="vbar">
+    <button type="button" class="btn vclose" id="vClose" aria-label="Cerrar el visor">
+      <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M5 5l14 14M19 5L5 19"/></svg>
+    </button>
+    <div class="seg" id="vTabs" role="group" aria-label="Vista">
+      <button type="button" data-v="orig" aria-pressed="false">Original</button>
+      <button type="button" data-v="res" aria-pressed="true">Resultado</button>
+      <button type="button" data-v="svg" aria-pressed="false">SVG</button>
+    </div>
+    <span class="vzoom" id="vZoom" aria-live="off">100%</span>
+  </div>
+  <div class="vstage checker" id="vStage">
+    <div class="vcontent" id="vContent"></div>
+    <p class="vmsg" id="vMsg" role="status" hidden></p>
+  </div>
+  <div class="vfoot">
+    <div class="vcmp" id="vCmp" hidden>
+      <label class="ctl"><span>Imagen procesada encima</span><output id="vOpOut">50</output>
+        <input type="range" id="vOp" min="0" max="100" value="50"></label>
+      <label class="check"><input type="checkbox" id="vDiff"><span>Resaltar diferencias</span></label>
+    </div>
+    <div class="vtools">
+      <div class="seg" id="vBgs" role="group" aria-label="Fondo del visor">
+        <button type="button" data-bg="checker" aria-pressed="true" aria-label="Fondo de cuadros"><span class="sw checker"></span></button>
+        <button type="button" data-bg="dark" aria-pressed="false" aria-label="Fondo oscuro"><span class="sw dark"></span></button>
+        <button type="button" data-bg="light" aria-pressed="false" aria-label="Fondo claro"><span class="sw light"></span></button>
+      </div>
+      <button type="button" class="btn small" id="vCompare" aria-pressed="false">Comparar</button>
+      <button type="button" class="btn small" id="vFit">Ajustar</button>
     </div>
   </div>
 </div>
@@ -871,6 +960,214 @@ if (typeof module !== 'undefined') {
       try { document.execCommand('copy'); setStatus('SVG copiado.', 'ok'); }
       catch (e2) { setStatus('Selecciona el código y cópialo manualmente.', 'error'); }
     }
+  });
+
+
+  /* ---------- Visor ampliado: zoom, desplazamiento y comparación ---------- */
+  var V = { open: false, view: 'res', bg: 'checker', cmp: false, diff: false, s: 1, tx: 0, ty: 0, fit: 1,
+            cw: 0, ch: 0, atFit: true, ptrs: new Map(), pinch: null, down: null, tapT: 0, tapX: 0, tapY: 0,
+            pushed: false, opener: null, msgT: 0 };
+  var vStage = $('#vStage'), vContent = $('#vContent');
+  var MAX_Z = 48;
+
+  function vMsg(t) {
+    var m = $('#vMsg');
+    m.textContent = t; m.hidden = false;
+    clearTimeout(V.msgT);
+    V.msgT = setTimeout(function () { m.hidden = true; }, 2600);
+  }
+  function vApply() {
+    vContent.style.transform = 'translate(' + V.tx + 'px,' + V.ty + 'px) scale(' + V.s + ')';
+    $('#vZoom').textContent = Math.round(V.s * 100) + '%';
+    var pix = V.s >= 3 ? 'pixelated' : 'auto';
+    vContent.querySelectorAll('canvas').forEach(function (c) { c.style.imageRendering = pix; });
+  }
+  function vFit() {
+    var w = vStage.clientWidth, h = vStage.clientHeight;
+    if (!V.cw || !w || !h) return;
+    V.fit = Math.min(w / V.cw, h / V.ch) * 0.94;
+    V.s = V.fit; V.tx = (w - V.cw * V.s) / 2; V.ty = (h - V.ch * V.s) / 2;
+    V.atFit = true;
+    vApply();
+  }
+  function vZoomAt(cx, cy, ns) {
+    var r = vStage.getBoundingClientRect();
+    ns = Math.min(MAX_Z, Math.max(V.fit * 0.5, ns));
+    var ax = (cx - r.left - V.tx) / V.s, ay = (cy - r.top - V.ty) / V.s;
+    V.s = ns; V.tx = cx - r.left - ax * ns; V.ty = cy - r.top - ay * ns;
+    V.atFit = false;
+    vApply();
+  }
+  function vCanvasCopy(src) {
+    var c = newCanvas(src.width, src.height);
+    c.getContext('2d').drawImage(src, 0, 0);
+    return c;
+  }
+  function vInlineSvg() {
+    var doc = new DOMParser().parseFromString(S.svg, 'image/svg+xml');
+    var el = doc.documentElement;
+    if (!el || el.nodeName !== 'svg' || doc.querySelector('parsererror')) return null;
+    var node = document.importNode(el, true);
+    node.setAttribute('width', V.cw);
+    node.setAttribute('height', V.ch);
+    node.setAttribute('preserveAspectRatio', 'none');
+    return node;
+  }
+  function vCmpUi() {
+    $('#vCmp').hidden = !V.cmp;
+    $('#vCompare').setAttribute('aria-pressed', String(V.cmp));
+    document.querySelectorAll('#vTabs button').forEach(function (b) {
+      b.setAttribute('aria-pressed', String(!V.cmp && b.dataset.v === V.view));
+    });
+    document.querySelectorAll('#vBgs button').forEach(function (b) {
+      b.setAttribute('aria-pressed', String(b.dataset.bg === V.bg));
+    });
+    var o = vContent.querySelector('.vover');
+    if (o) {
+      o.style.opacity = V.diff ? '1' : String(+$('#vOp').value / 100);
+      o.style.mixBlendMode = V.diff ? 'difference' : 'normal';
+    }
+    vStage.className = 'vstage ' + ((V.cmp && V.diff) ? 'dark' : V.bg);
+  }
+  function vBuild() {
+    vContent.textContent = '';
+    var base = V.view === 'orig' ? S.src : S.result;
+    if (!base) return;
+    V.cw = base.width; V.ch = base.height;
+    vContent.style.width = V.cw + 'px';
+    vContent.style.height = V.ch + 'px';
+    if (V.view === 'svg' && S.svg) {
+      var sv = vInlineSvg();
+      if (sv) vContent.appendChild(sv);
+      if (V.cmp) {
+        var o = vCanvasCopy(S.result);
+        o.className = 'vover';
+        vContent.appendChild(o);
+      }
+    } else {
+      vContent.appendChild(vCanvasCopy(base));
+    }
+    vCmpUi();
+    vFit();
+  }
+
+  function openViewer() {
+    if (!S.result) return;
+    V.opener = document.activeElement;
+    V.view = S.view === 'orig' ? 'orig' : (S.view === 'svg' && S.svg ? 'svg' : 'res');
+    V.cmp = false; V.diff = false; $('#vDiff').checked = false;
+    V.bg = ['checker', 'dark', 'light'].filter(function (c) { return $('#stage').classList.contains(c); })[0] || 'checker';
+    $('#viewer').hidden = false;
+    document.body.style.overflow = 'hidden';
+    V.open = true;
+    try { history.pushState({ v: 1 }, ''); V.pushed = true; } catch (e) { V.pushed = false; }
+    vBuild();
+    $('#vClose').focus();
+  }
+  function closeViewer(fromPop) {
+    if (!V.open) return;
+    V.open = false;
+    $('#viewer').hidden = true;
+    document.body.style.overflow = '';
+    vContent.textContent = '';
+    V.ptrs.clear(); V.pinch = null; V.down = null;
+    if (V.pushed && !fromPop) { V.pushed = false; try { history.back(); } catch (e) {} }
+    else V.pushed = false;
+    if (V.opener && V.opener.focus) V.opener.focus();
+  }
+  window.addEventListener('popstate', function () { if (V.open) { V.pushed = false; closeViewer(true); } });
+
+  $('#btnExpand').addEventListener('click', openViewer);
+  $('#vClose').addEventListener('click', function () { closeViewer(); });
+  $('#vFit').addEventListener('click', vFit);
+  document.querySelectorAll('#vTabs button').forEach(function (b) {
+    b.addEventListener('click', function () {
+      var v = b.dataset.v;
+      if (v === 'svg' && !S.svg) { vMsg('Primero pulsa Vectorizar para ver el SVG.'); return; }
+      V.view = v; V.cmp = false;
+      vBuild();
+    });
+  });
+  $('#vCompare').addEventListener('click', function () {
+    if (!S.svg) { vMsg('Primero pulsa Vectorizar para poder comparar.'); return; }
+    V.cmp = !V.cmp;
+    if (V.cmp) V.view = 'svg';
+    vBuild();
+  });
+  document.querySelectorAll('#vBgs button').forEach(function (b) {
+    b.addEventListener('click', function () { V.bg = b.dataset.bg; vCmpUi(); });
+  });
+  $('#vOp').addEventListener('input', function () { $('#vOpOut').textContent = this.value; vCmpUi(); });
+  $('#vDiff').addEventListener('change', function () { V.diff = this.checked; vCmpUi(); });
+
+  /* Gestos: un dedo mueve, dos dedos amplían, doble toque alterna ajustar/ampliar, rueda del ratón amplía */
+  function vPts() { return Array.from(V.ptrs.values()); }
+  function vPinchStart() {
+    var a = vPts(), r = vStage.getBoundingClientRect();
+    var cx = (a[0].x + a[1].x) / 2, cy = (a[0].y + a[1].y) / 2;
+    V.pinch = { d: Math.hypot(a[0].x - a[1].x, a[0].y - a[1].y) || 1, s: V.s,
+                ax: (cx - r.left - V.tx) / V.s, ay: (cy - r.top - V.ty) / V.s };
+  }
+  function vPinchMove() {
+    var a = vPts(), r = vStage.getBoundingClientRect();
+    var cx = (a[0].x + a[1].x) / 2, cy = (a[0].y + a[1].y) / 2;
+    var d = Math.hypot(a[0].x - a[1].x, a[0].y - a[1].y);
+    var ns = Math.min(MAX_Z, Math.max(V.fit * 0.5, V.pinch.s * d / V.pinch.d));
+    V.s = ns; V.tx = cx - r.left - V.pinch.ax * ns; V.ty = cy - r.top - V.pinch.ay * ns;
+    V.atFit = false;
+    vApply();
+  }
+  function vDoubleTap(x, y) {
+    if (V.s > V.fit * 1.15) vFit();
+    else vZoomAt(x, y, Math.min(MAX_Z, V.fit * 4));
+  }
+  vStage.addEventListener('pointerdown', function (e) {
+    try { vStage.setPointerCapture(e.pointerId); } catch (_) {}
+    V.ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (V.ptrs.size === 1) V.down = { t: Date.now(), moved: 0 };
+    else if (V.ptrs.size === 2) { vPinchStart(); V.down = null; }
+  });
+  vStage.addEventListener('pointermove', function (e) {
+    var p = V.ptrs.get(e.pointerId);
+    if (!p) return;
+    var dx = e.clientX - p.x, dy = e.clientY - p.y;
+    p.x = e.clientX; p.y = e.clientY;
+    if (V.ptrs.size === 1) {
+      V.tx += dx; V.ty += dy; V.atFit = false;
+      if (V.down) V.down.moved += Math.abs(dx) + Math.abs(dy);
+      vApply();
+    } else if (V.ptrs.size === 2 && V.pinch) {
+      vPinchMove();
+    }
+  });
+  function vUp(e) {
+    if (!V.ptrs.has(e.pointerId)) return;
+    V.ptrs.delete(e.pointerId);
+    if (V.ptrs.size < 2) V.pinch = null;
+    if (V.ptrs.size > 0) { V.down = null; return; }
+    var d = V.down; V.down = null;
+    if (e.type === 'pointerup' && d && d.moved < 10 && Date.now() - d.t < 300) {
+      var now = Date.now();
+      if (now - V.tapT < 320 && Math.abs(e.clientX - V.tapX) < 30 && Math.abs(e.clientY - V.tapY) < 30) {
+        V.tapT = 0; vDoubleTap(e.clientX, e.clientY);
+      } else { V.tapT = now; V.tapX = e.clientX; V.tapY = e.clientY; }
+    }
+  }
+  vStage.addEventListener('pointerup', vUp);
+  vStage.addEventListener('pointercancel', vUp);
+  vStage.addEventListener('wheel', function (e) {
+    e.preventDefault();
+    vZoomAt(e.clientX, e.clientY, V.s * Math.exp(-e.deltaY * 0.0018));
+  }, { passive: false });
+  vStage.addEventListener('dragstart', function (e) { e.preventDefault(); });
+  window.addEventListener('resize', function () { if (V.open && V.atFit) vFit(); });
+  document.addEventListener('keydown', function (e) {
+    if (!V.open) return;
+    if (e.key === 'Escape') { closeViewer(); return; }
+    var r = vStage.getBoundingClientRect(), cx = r.left + r.width / 2, cy = r.top + r.height / 2;
+    if (e.key === '+' || e.key === '=') vZoomAt(cx, cy, V.s * 1.4);
+    else if (e.key === '-') vZoomAt(cx, cy, V.s / 1.4);
+    else if (e.key === '0') vFit();
   });
 
   /* Descargas dentro de Claude: se activan cuando el visor responde */
