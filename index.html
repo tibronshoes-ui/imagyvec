@@ -126,6 +126,8 @@ input[type=text] { width: 100%; }
 .btn:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .btns { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; }
 
+.row.hist { margin: 10px 0 0; }
+.row.hist .btn { flex: 1 1 auto; }
 .result { margin: 12px 0 0; color: var(--muted); font-size: 14px; }
 .result b { color: var(--text); font-weight: 600; }
 .result .ok { color: var(--accent); }
@@ -235,6 +237,11 @@ body.busy { cursor: progress; }
           <span>Evitar rendijas entre colores<small>Agrega un contorno fino del mismo color. Apágalo si quieres el SVG más liviano.</small></span>
         </label>
         <button type="button" class="btn primary" id="btnTrace" style="width:100%">Vectorizar</button>
+        <div class="row hist" role="group" aria-label="Historial de vectorizado">
+          <button type="button" class="btn small" id="btnUndo" disabled>Deshacer</button>
+          <button type="button" class="btn small" id="btnRedo" disabled>Rehacer</button>
+          <button type="button" class="btn small" id="btnReset">Reiniciar valores</button>
+        </div>
         <p class="result" id="svgInfo"></p>
       </section>
 
@@ -411,7 +418,7 @@ if (typeof module !== 'undefined') {
   var MAX_SRC = 1600;
   var S = { src: null, result: null, name: 'imagen', svg: '', svgW: 0, svgH: 0, view: 'orig',
             pick: false, hasAlpha: false, bg: [255, 255, 255], dl: null, dlReady: false, timer: 0, shown: false,
-            svgInfo: '', stale: false };
+            svgInfo: '', stale: false, hist: [], hi: -1 };
 
   var cOrig = $('#cOrig'), cRes = $('#cRes'), imgSvg = $('#imgSvg'), svgEmpty = $('#svgEmpty');
 
@@ -474,7 +481,7 @@ if (typeof module !== 'undefined') {
       S.svg = '';
       imgSvg.removeAttribute('src');
       $('#code').value = '';
-      S.svgInfo = ''; S.stale = false; renderSvgInfo();
+      S.svgInfo = ''; S.stale = false; S.hist = []; S.hi = -1; renderSvgInfo();
       $('#btnSvg').disabled = true;
       $('#btnCopy').disabled = true;
 
@@ -550,10 +557,11 @@ if (typeof module !== 'undefined') {
     var ctx = cRes.getContext('2d');
     ctx.clearRect(0, 0, cv.width, cv.height);
     ctx.drawImage(cv, 0, 0);
-    if (S.svg) { S.stale = true; renderSvgInfo(); }
+    if (S.svg) renderSvgInfo();
     if (S.view === 'svg' && !S.svg) setView('res');
     if (!S.shown && $('#optBg').checked && !S.hasAlpha) { S.shown = true; setView('res'); }
     updateInfo();
+    updateHistUi();
   }
 
   /* ---------- Vistas ---------- */
@@ -581,10 +589,15 @@ if (typeof module !== 'undefined') {
     });
   });
 
+  function isDirty() {
+    return S.hi >= 0 && JSON.stringify(readParams()) !== JSON.stringify(S.hist[S.hi].params);
+  }
   function renderSvgInfo() {
-    $('#svgInfo').innerHTML = S.svg
-      ? S.svgInfo + (S.stale ? ' <span class="bad">La imagen cambió: vuelve a vectorizar.</span>' : '')
-      : '';
+    if (!S.svg) { $('#svgInfo').innerHTML = ''; return; }
+    var n = S.hist.length;
+    var tag = n > 1 ? ' · intento ' + (S.hi + 1) + ' de ' + n : '';
+    $('#svgInfo').innerHTML = S.svgInfo + tag +
+      ((S.stale || isDirty()) ? ' <span class="bad">Los valores cambiaron: vuelve a vectorizar.</span>' : '');
   }
 
   function updateInfo() {
@@ -645,6 +658,7 @@ if (typeof module !== 'undefined') {
       setStatus('No se cargó la librería de vectorizado (imagetracerjs). Revisa tu conexión y recarga la página.', 'error');
       return;
     }
+    clearTimeout(S.timer); process();
     var btn = $('#btnTrace');
     btn.disabled = true; btn.textContent = 'Vectorizando…';
     document.body.classList.add('busy');
@@ -679,15 +693,16 @@ if (typeof module !== 'undefined') {
         var out = cleanSvg(raw, w, h, stroke);
         S.svg = out.svg; S.svgW = w; S.svgH = h;
         var size = new Blob([out.svg]).size;
-        imgSvg.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(
-          out.svg.replace('<svg ', '<svg width="' + w + '" height="' + h + '" '));
+        imgSvg.src = previewUrl(out.svg, w, h);
         $('#code').value = out.svg;
         var over = size > 50 * 1024;
         S.svgInfo = '<b>' + kb(size) + '</b> · ' + out.colors + ' colores · ' + out.shapes + ' formas · ' +
           (over ? '<span class="bad">supera los 50 KB. Baja los colores o sube el suavizado.</span>'
                 : '<span class="ok">dentro del límite de 50 KB</span>');
         S.stale = false;
+        pushHistory({ params: readParams(), svg: out.svg, w: w, h: h, info: S.svgInfo });
         renderSvgInfo();
+        updateHistUi();
         $('#btnSvg').disabled = false;
         $('#btnCopy').disabled = false;
         setView('svg');
@@ -700,6 +715,93 @@ if (typeof module !== 'undefined') {
     }, 30);
   }
   $('#btnTrace').addEventListener('click', trace);
+
+  /* ---------- Historial: deshacer, rehacer y reiniciar ---------- */
+  var IDS_RANGE = ['tol', 'soft', 'pad', 'tColors', 'tSmooth', 'tOmit', 'tBlur', 'tRes'];
+  var IDS_CHECK = ['optBg', 'optHoles', 'optCrop', 'optStroke'];
+
+  function previewUrl(svg, w, h) {
+    return 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(
+      svg.replace('<svg ', '<svg width="' + w + '" height="' + h + '" '));
+  }
+  function readParams() {
+    var p = { bg: S.bg.slice() };
+    IDS_RANGE.forEach(function (id) { p[id] = $('#' + id).value; });
+    IDS_CHECK.forEach(function (id) { p[id] = $('#' + id).checked; });
+    return p;
+  }
+  function setRange(id, v) {
+    var e = $('#' + id);
+    e.value = v;
+    e.parentElement.querySelector('output').textContent = e.value;
+  }
+  function applyParams(p) {
+    IDS_RANGE.forEach(function (id) { setRange(id, p[id]); });
+    IDS_CHECK.forEach(function (id) { $('#' + id).checked = p[id]; });
+    S.bg = p.bg.slice();
+    $('#bgColor').value = toHex(S.bg);
+  }
+  function pushHistory(snap) {
+    S.hist = S.hist.slice(0, S.hi + 1);
+    S.hist.push(snap);
+    if (S.hist.length > 20) S.hist.shift();
+    S.hi = S.hist.length - 1;
+  }
+  function updateHistUi() {
+    var n = S.hist.length;
+    $('#btnUndo').disabled = !(S.hi > 0 || isDirty());
+    $('#btnRedo').disabled = !(S.hi >= 0 && S.hi < n - 1);
+    renderSvgInfo();
+  }
+  function goTo(i) {
+    var h = S.hist[i];
+    if (!h) return;
+    S.hi = i;
+    applyParams(h.params);
+    process();
+    S.svg = h.svg; S.svgW = h.w; S.svgH = h.h; S.svgInfo = h.info; S.stale = false;
+    imgSvg.src = previewUrl(h.svg, h.w, h.h);
+    $('#code').value = h.svg;
+    $('#btnSvg').disabled = false;
+    $('#btnCopy').disabled = false;
+    setView('svg');
+    updateHistUi();
+  }
+  /* Si moviste valores sin vectorizar, Deshacer primero los devuelve a los del SVG que ves;
+     si no, retrocede un intento. */
+  function undo() {
+    if (S.hi < 0) return;
+    if (isDirty()) goTo(S.hi);
+    else if (S.hi > 0) goTo(S.hi - 1);
+  }
+  function redo() {
+    if (S.hi >= 0 && S.hi < S.hist.length - 1) goTo(S.hi + 1);
+  }
+  function resetValues() {
+    if (!S.src) return;
+    IDS_RANGE.forEach(function (id) { setRange(id, $('#' + id).defaultValue); });
+    IDS_CHECK.forEach(function (id) { $('#' + id).checked = $('#' + id).defaultChecked; });
+    var a = analyzeBorder(S.src.getContext('2d', { willReadFrequently: true }).getImageData(0, 0, S.src.width, S.src.height));
+    S.bg = a.bg; $('#bgColor').value = toHex(a.bg);
+    $('#optBg').checked = !S.hasAlpha;
+    process();
+    setStatus('Valores reiniciados. Tus intentos anteriores siguen en el historial (Deshacer).', 'ok');
+  }
+  $('#btnUndo').addEventListener('click', undo);
+  $('#btnRedo').addEventListener('click', redo);
+  $('#btnReset').addEventListener('click', resetValues);
+  ['input', 'change'].forEach(function (ev) {
+    $('.controls').addEventListener(ev, updateHistUi);
+  });
+  document.addEventListener('keydown', function (e) {
+    var t = e.target, tag = t && t.tagName;
+    if (tag === 'TEXTAREA' || (tag === 'INPUT' && t.type === 'text')) return;
+    if ((e.ctrlKey || e.metaKey) && !e.altKey) {
+      var k = e.key.toLowerCase();
+      if (k === 'z' && !e.shiftKey) { e.preventDefault(); undo(); }
+      else if ((k === 'z' && e.shiftKey) || k === 'y') { e.preventDefault(); redo(); }
+    }
+  });
 
   /* ---------- Exportar ---------- */
   function baseName() {
