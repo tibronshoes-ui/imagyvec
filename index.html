@@ -193,6 +193,29 @@ body.busy { cursor: progress; }
 .sw.checker { background: conic-gradient(#8a8784 25%, #3a3836 0 50%, #8a8784 0 75%, #3a3836 0) 0 0 / 8px 8px; }
 .sw.dark { background: #000; }
 .sw.light { background: #fff; }
+
+/* Vista previa en vivo */
+.badge {
+  display: none; position: absolute; top: 8px; left: 8px; z-index: 3;
+  padding: 4px 10px; border-radius: 999px; font-size: 13px; font-weight: 600;
+  color: var(--accent-ink); background: var(--accent); pointer-events: none;
+}
+.stagewrap.busy .badge { display: block; }
+#bgs button { padding: 0; width: 44px; display: grid; place-items: center; }
+@media (max-width: 899px) {
+  .work { display: block; }
+  .controls { margin-top: 14px; }
+}
+/* En el celular la vista previa queda fija arriba para ver los cambios mientras mueves los controles */
+@media (max-width: 899px) and (min-height: 601px) {
+  .stagecol { position: sticky; top: 0; z-index: 20; background: var(--bg); margin: 0 -16px; padding: 8px 16px 6px; border-bottom: 1px solid var(--line); }
+  .bar { margin-bottom: 6px; }
+  #tabs button { padding: 8px 8px; }
+  #bgs button { width: 38px; }
+  .stage { min-height: 150px; max-height: 32vh; padding: 8px; }
+  .stage canvas, .stage img { max-height: 27vh; }
+  .info { margin-top: 6px; }
+}
 </style>
 </head>
 <body>
@@ -220,15 +243,16 @@ body.busy { cursor: progress; }
           <button type="button" data-view="svg" aria-pressed="false">SVG</button>
         </div>
         <div class="seg" id="bgs" role="group" aria-label="Fondo de la vista previa">
-          <button type="button" data-bg="checker" aria-pressed="true">Cuadros</button>
-          <button type="button" data-bg="dark" aria-pressed="false">Oscuro</button>
-          <button type="button" data-bg="light" aria-pressed="false">Claro</button>
+          <button type="button" data-bg="checker" aria-pressed="true" aria-label="Fondo de cuadros"><span class="sw checker"></span></button>
+          <button type="button" data-bg="dark" aria-pressed="false" aria-label="Fondo oscuro"><span class="sw dark"></span></button>
+          <button type="button" data-bg="light" aria-pressed="false" aria-label="Fondo claro"><span class="sw light"></span></button>
         </div>
       </div>
       <div class="stagewrap">
       <button type="button" class="expand" id="btnExpand" aria-label="Ampliar la vista previa" title="Ampliar">
         <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg>
       </button>
+      <span class="badge" id="busyBadge" role="status">Actualizando…</span>
       <div class="stage checker" id="stage">
         <canvas id="cOrig" aria-label="Imagen original"></canvas>
         <canvas id="cRes" aria-label="Imagen procesada" hidden></canvas>
@@ -278,6 +302,10 @@ body.busy { cursor: progress; }
 
       <section class="panel">
         <h2>Vectorizar a SVG</h2>
+        <label class="check">
+          <input type="checkbox" id="optLive" checked>
+          <span>Vista previa en vivo<small>Vuelve a vectorizar sola al mover cualquier control y actualiza el SVG al terminar. Puede tardar unos segundos.</small></span>
+        </label>
         <label class="ctl"><span>Colores</span><output>6</output>
           <input type="range" id="tColors" min="2" max="32" value="6">
           <small>Menos colores, archivo más liviano.</small></label>
@@ -558,7 +586,7 @@ if (typeof module !== 'undefined') {
   var MAX_SRC = 1600;
   var S = { src: null, result: null, name: 'imagen', svg: '', svgW: 0, svgH: 0, view: 'orig',
             pick: false, hasAlpha: false, bg: [255, 255, 255], dl: null, dlReady: false, timer: 0, shown: false,
-            svgInfo: '', stale: false, hist: [], hi: -1 };
+            svgInfo: '', stale: false, hist: [], hi: -1, auto: true, wantSvg: false };
 
   var cOrig = $('#cOrig'), cRes = $('#cRes'), imgSvg = $('#imgSvg'), svgEmpty = $('#svgEmpty');
 
@@ -621,7 +649,7 @@ if (typeof module !== 'undefined') {
       S.svg = '';
       imgSvg.removeAttribute('src');
       $('#code').value = '';
-      S.svgInfo = ''; S.stale = false; S.hist = []; S.hi = -1; renderSvgInfo();
+      cancelTrace(); S.svgInfo = ''; S.stale = false; S.hist = []; S.hi = -1; renderSvgInfo();
       $('#btnSvg').disabled = true;
       $('#btnCopy').disabled = true;
 
@@ -667,9 +695,24 @@ if (typeof module !== 'undefined') {
   });
 
   /* ---------- Procesar (quitar fondo + recortar) ---------- */
+  /* Mientras mueves un control, la vista previa se actualiza cada ~90 ms (no espera a que sueltes) */
   function schedule() {
-    clearTimeout(S.timer);
-    S.timer = setTimeout(process, 140);
+    if (S.timer) return;
+    S.timer = setTimeout(function () {
+      S.timer = 0;
+      process();
+      if (S.view === 'orig') setView('res');
+      liveTrace(false);
+      refreshBusy();
+    }, 90);
+    refreshBusy();
+  }
+  function fondoNow() {
+    if (S.timer) { clearTimeout(S.timer); S.timer = 0; }
+    process();
+    if (S.view === 'orig') setView('res');
+    liveTrace(false);
+    refreshBusy();
   }
 
   function process() {
@@ -743,8 +786,10 @@ if (typeof module !== 'undefined') {
     if (!S.svg) { $('#svgInfo').innerHTML = ''; return; }
     var n = S.hist.length;
     var tag = n > 1 ? ' · intento ' + (S.hi + 1) + ' de ' + n : '';
-    $('#svgInfo').innerHTML = S.svgInfo + tag +
-      ((S.stale || isDirty()) ? ' <span class="bad">Los valores cambiaron: vuelve a vectorizar.</span>' : '');
+    var note = '';
+    if (T.running || T.timer || S.timer) note = ' <span class="ok">actualizando…</span>';
+    else if (!S.auto && (S.stale || isDirty())) note = ' <span class="bad">Los valores cambiaron: vuelve a vectorizar.</span>';
+    $('#svgInfo').innerHTML = S.svgInfo + tag + note;
   }
 
   function updateInfo() {
@@ -763,7 +808,7 @@ if (typeof module !== 'undefined') {
   ['tol', 'soft', 'pad', 'fringe'].forEach(function (id) { $('#' + id).addEventListener('input', schedule); });
   ['optBg', 'optHoles', 'optCrop', 'optDefringe'].forEach(function (id) { $('#' + id).addEventListener('change', function () {
     if (id === 'optBg' && this.checked) S.shown = false;
-    process();
+    fondoNow();
   }); });
   $('#bgColor').addEventListener('input', function () { S.bg = fromHex(this.value); $('#optBg').checked = true; schedule(); });
   $('#btnAuto').addEventListener('click', function () {
@@ -772,7 +817,7 @@ if (typeof module !== 'undefined') {
     var a = analyzeBorder(S.src.getContext('2d', { willReadFrequently: true }).getImageData(0, 0, w, h));
     S.bg = a.bg; $('#bgColor').value = toHex(a.bg);
     if (!S.hasAlpha) $('#optBg').checked = true;
-    process();
+    fondoNow();
   });
   function setPick(on) {
     S.pick = on;
@@ -795,73 +840,166 @@ if (typeof module !== 'undefined') {
     $('#optBg').checked = true;
     S.shown = false;
     setPick(false);
-    process();
+    fondoNow();
   });
 
-  /* ---------- Vectorizar ---------- */
-  function trace() {
-    if (!S.result) return;
-    if (typeof ImageTracer === 'undefined') {
-      setStatus('No se cargó la librería de vectorizado (imagetracerjs). Revisa tu conexión y recarga la página.', 'error');
-      return;
-    }
-    clearTimeout(S.timer); process();
-    var btn = $('#btnTrace');
-    btn.disabled = true; btn.textContent = 'Vectorizando…';
-    document.body.classList.add('busy');
-    setStatus('');
-    setTimeout(function () {
-      try {
-        var res = S.result;
-        var maxDim = +$('#tRes').value;
-        var k = Math.min(1, maxDim / Math.max(res.width, res.height));
-        var w = Math.max(1, Math.round(res.width * k)), h = Math.max(1, Math.round(res.height * k));
-        var c = newCanvas(w, h);
-        var x = c.getContext('2d', { willReadFrequently: true });
-        x.drawImage(res, 0, 0, w, h);
-        var id = x.getImageData(0, 0, w, h), dd = id.data, hasT = false;
-        for (var i = 0; i < dd.length; i += 4) {
-          if (dd[i + 3] < 128) { dd[i] = dd[i + 1] = dd[i + 2] = dd[i + 3] = 0; hasT = true; }
-          else dd[i + 3] = 255;
-        }
-        var lvl = +$('#tSmooth').value;
-        var stroke = $('#optStroke').checked;
-        var opts = {
-          numberofcolors: +$('#tColors').value + (hasT ? 1 : 0),
-          colorsampling: 2, colorquantcycles: 3, mincolorratio: 0,
-          ltres: 0.35 * lvl, qtres: 0.35 * lvl,
-          pathomit: +$('#tOmit').value,
-          rightangleenhance: true,
-          blurradius: +$('#tBlur').value, blurdelta: 20,
-          strokewidth: stroke ? 1 : 0,
-          roundcoords: 1, viewbox: true, desc: false, linefilter: false, scale: 1
-        };
-        var raw = ImageTracer.imagedataToSVG(id, opts);
-        var out = cleanSvg(raw, w, h, stroke);
-        S.svg = out.svg; S.svgW = w; S.svgH = h;
-        var size = new Blob([out.svg]).size;
-        imgSvg.src = previewUrl(out.svg, w, h);
-        $('#code').value = out.svg;
-        var over = size > 50 * 1024;
-        S.svgInfo = '<b>' + kb(size) + '</b> · ' + out.colors + ' colores · ' + out.shapes + ' formas · ' +
-          (over ? '<span class="bad">supera los 50 KB. Baja los colores o sube el suavizado.</span>'
-                : '<span class="ok">dentro del límite de 50 KB</span>');
-        S.stale = false;
-        pushHistory({ params: readParams(), svg: out.svg, w: w, h: h, info: S.svgInfo });
-        renderSvgInfo();
-        updateHistUi();
-        $('#btnSvg').disabled = false;
-        $('#btnCopy').disabled = false;
-        setView('svg');
-      } catch (e) {
-        setStatus('No se pudo vectorizar: ' + (e && e.message ? e.message : e), 'error');
-      } finally {
-        btn.disabled = false; btn.textContent = 'Vectorizar';
-        document.body.classList.remove('busy');
-      }
-    }, 30);
+  /* ---------- Vectorizar (en vivo y en segundo plano) ---------- */
+  var TRACER_URL = 'https://cdn.jsdelivr.net/npm/imagetracerjs@1.2.6';
+  var T = { worker: null, workerOk: true, url: '', timer: 0, running: false, seq: 0 };
+
+  function refreshBusy() {
+    var on = !!(T.running || T.timer || S.timer);
+    $('.stagewrap').classList.toggle('busy', on);
+    renderSvgInfo();
   }
-  $('#btnTrace').addEventListener('click', trace);
+  function cancelTrace() {
+    clearTimeout(T.timer); T.timer = 0;
+    T.seq++;
+    if (T.worker) { try { T.worker.terminate(); } catch (e) {} T.worker = null; }
+    T.running = false;
+    var b = $('#btnTrace'); b.disabled = false; b.textContent = 'Vectorizar';
+    refreshBusy();
+  }
+  function scheduleTrace(wantSvg) {
+    if (wantSvg) S.wantSvg = true;
+    clearTimeout(T.timer);
+    T.timer = setTimeout(function () { T.timer = 0; startTrace(true); }, 250);
+    refreshBusy();
+  }
+  /* Con la vista en vivo activa, cualquier cambio de control vuelve a vectorizar en segundo plano */
+  function liveTrace(wantSvg) {
+    if (!S.auto || !S.result) { updateHistUi(); return; }
+    if (S.svg || wantSvg) scheduleTrace(wantSvg);
+  }
+
+  function workerUrl() {
+    if (T.url) return T.url;
+    var code = 'importScripts(' + JSON.stringify(TRACER_URL) + ');\n' +
+      rgbToHex.toString() + '\n' + cleanSvg.toString() + '\n' +
+      'onmessage = function (e) { var m = e.data; try {' +
+      ' var raw = ImageTracer.imagedataToSVG({ width: m.w, height: m.h, data: m.data }, m.opts);' +
+      ' var out = cleanSvg(raw, m.w, m.h, m.stroke);' +
+      ' postMessage({ ok: true, svg: out.svg, colors: out.colors, shapes: out.shapes });' +
+      ' } catch (err) { postMessage({ ok: false, msg: String((err && err.message) || err) }); } };';
+    T.url = URL.createObjectURL(new Blob([code], { type: 'application/javascript' }));
+    return T.url;
+  }
+
+  /* Ejecuta el trazado en un Web Worker (no congela la pantalla y se cancela al mover otro control).
+     Si el navegador no lo permite, lo hace en el hilo principal. */
+  function runTracer(data, opts, ctx, cb) {
+    if (T.worker) { try { T.worker.terminate(); } catch (e) {} T.worker = null; }
+    function main() {
+      setTimeout(function () {
+        if (ctx.seq !== T.seq) return;
+        try {
+          if (typeof ImageTracer === 'undefined') throw new Error('No se cargó la librería de vectorizado (imagetracerjs). Revisa tu conexión y recarga la página.');
+          var raw = ImageTracer.imagedataToSVG({ width: ctx.w, height: ctx.h, data: data }, opts);
+          cb(null, cleanSvg(raw, ctx.w, ctx.h, ctx.stroke));
+        } catch (e) { cb(e); }
+      }, 20);
+    }
+    if (window.Worker && T.workerOk) {
+      try {
+        var wk = new Worker(workerUrl());
+        T.worker = wk;
+        wk.onmessage = function (e) {
+          if (T.worker !== wk) return;
+          T.worker = null; wk.terminate();
+          if (e.data.ok) cb(null, e.data);
+          else { T.workerOk = false; main(); }
+        };
+        wk.onerror = function (ev) {
+          if (T.worker !== wk) return;
+          T.worker = null; wk.terminate(); T.workerOk = false;
+          if (ev && ev.preventDefault) ev.preventDefault();
+          main();
+        };
+        wk.postMessage({ w: ctx.w, h: ctx.h, data: data, opts: opts, stroke: ctx.stroke });
+        return;
+      } catch (e) { T.workerOk = false; }
+    }
+    main();
+  }
+
+  function startTrace(auto) {
+    if (!S.result) return;
+    clearTimeout(T.timer); T.timer = 0;
+    if (S.timer) { clearTimeout(S.timer); S.timer = 0; process(); }
+    var res = S.result;
+    var k = Math.min(1, +$('#tRes').value / Math.max(res.width, res.height));
+    var w = Math.max(1, Math.round(res.width * k)), h = Math.max(1, Math.round(res.height * k));
+    var c = newCanvas(w, h);
+    var x = c.getContext('2d', { willReadFrequently: true });
+    x.drawImage(res, 0, 0, w, h);
+    var id = x.getImageData(0, 0, w, h), dd = id.data, hasT = false;
+    for (var i = 0; i < dd.length; i += 4) {
+      if (dd[i + 3] < 128) { dd[i] = dd[i + 1] = dd[i + 2] = dd[i + 3] = 0; hasT = true; }
+      else dd[i + 3] = 255;
+    }
+    var lvl = +$('#tSmooth').value;
+    var stroke = $('#optStroke').checked;
+    var opts = {
+      numberofcolors: +$('#tColors').value + (hasT ? 1 : 0),
+      colorsampling: 2, colorquantcycles: 3, mincolorratio: 0,
+      ltres: 0.35 * lvl, qtres: 0.35 * lvl,
+      pathomit: +$('#tOmit').value,
+      rightangleenhance: true,
+      blurradius: +$('#tBlur').value, blurdelta: 20,
+      strokewidth: stroke ? 1 : 0,
+      roundcoords: 1, viewbox: true, desc: false, linefilter: false, scale: 1
+    };
+    var ctx = { seq: ++T.seq, w: w, h: h, stroke: stroke, params: readParams(), auto: auto };
+    T.running = true;
+    if (!auto) { var b = $('#btnTrace'); b.disabled = true; b.textContent = 'Vectorizando…'; }
+    setStatus('');
+    refreshBusy();
+    runTracer(dd, opts, ctx, function (err, out) {
+      if (ctx.seq !== T.seq) return;
+      T.running = false;
+      var bt = $('#btnTrace'); bt.disabled = false; bt.textContent = 'Vectorizar';
+      if (err) { refreshBusy(); setStatus('No se pudo vectorizar: ' + (err && err.message ? err.message : err), 'error'); return; }
+      applyTrace(out, ctx);
+      refreshBusy();
+    });
+  }
+
+  function applyTrace(out, ctx) {
+    S.svg = out.svg; S.svgW = ctx.w; S.svgH = ctx.h;
+    var size = new Blob([out.svg]).size;
+    imgSvg.src = previewUrl(out.svg, ctx.w, ctx.h);
+    $('#code').value = out.svg;
+    var over = size > 50 * 1024;
+    S.svgInfo = '<b>' + kb(size) + '</b> · ' + out.colors + ' colores · ' + out.shapes + ' formas · ' +
+      (over ? '<span class="bad">supera los 50 KB. Baja los colores o sube el suavizado.</span>'
+            : '<span class="ok">dentro del límite de 50 KB</span>');
+    S.stale = false;
+    commitHistory({ params: ctx.params, svg: out.svg, w: ctx.w, h: ctx.h, info: S.svgInfo, auto: ctx.auto, t: Date.now() });
+    $('#btnSvg').disabled = false;
+    $('#btnCopy').disabled = false;
+    var want = S.wantSvg || !ctx.auto;
+    S.wantSvg = false;
+    setView(want ? 'svg' : S.view);
+    updateHistUi();
+    if (V && V.open) vBuild(true);
+  }
+
+  $('#btnTrace').addEventListener('click', function () { startTrace(false); });
+  $('#optLive').addEventListener('change', function () {
+    S.auto = this.checked;
+    if (!S.auto) cancelTrace();
+    else if (S.result && S.svg && isDirty()) scheduleTrace(true);
+    updateHistUi();
+  });
+  var VEC_IDS = ['tColors', 'tSmooth', 'tOmit', 'tBlur', 'tRes', 'optStroke'];
+  ['input', 'change'].forEach(function (ev) {
+    $('.controls').addEventListener(ev, function (e) {
+      var el = e.target;
+      if (!el || VEC_IDS.indexOf(el.id) < 0) return;
+      if ((ev === 'input' && el.type === 'checkbox') || (ev === 'change' && el.type === 'range')) return;
+      liveTrace(true);
+    });
+  });
 
   /* ---------- Historial: deshacer, rehacer y reiniciar ---------- */
   var IDS_RANGE = ['tol', 'soft', 'pad', 'fringe', 'tColors', 'tSmooth', 'tOmit', 'tBlur', 'tRes'];
@@ -888,7 +1026,18 @@ if (typeof module !== 'undefined') {
     S.bg = p.bg.slice();
     $('#bgColor').value = toHex(S.bg);
   }
-  function pushHistory(snap) {
+  /* Cada vectorizado terminado queda en el historial. Los cambios seguidos (arrastrar un control)
+     dentro de 1,5 s se fusionan en un solo paso para no llenar el historial. */
+  function commitHistory(snap) {
+    var last = S.hist[S.hist.length - 1];
+    var atEnd = S.hi === S.hist.length - 1;
+    if (last && atEnd) {
+      var same = JSON.stringify(last.params) === JSON.stringify(snap.params);
+      if (same || (snap.auto && last.auto && snap.t - last.t < 1500)) {
+        S.hist[S.hist.length - 1] = snap;
+        return;
+      }
+    }
     S.hist = S.hist.slice(0, S.hi + 1);
     S.hist.push(snap);
     if (S.hist.length > 20) S.hist.shift();
@@ -903,6 +1052,7 @@ if (typeof module !== 'undefined') {
   function goTo(i) {
     var h = S.hist[i];
     if (!h) return;
+    cancelTrace();
     S.hi = i;
     applyParams(h.params);
     process();
@@ -932,6 +1082,7 @@ if (typeof module !== 'undefined') {
     S.bg = a.bg; $('#bgColor').value = toHex(a.bg);
     $('#optBg').checked = !S.hasAlpha;
     process();
+    liveTrace(true);
     setStatus('Valores reiniciados. Tus intentos anteriores siguen en el historial (Deshacer).', 'ok');
   }
   $('#btnUndo').addEventListener('click', undo);
@@ -1087,7 +1238,8 @@ if (typeof module !== 'undefined') {
     }
     vStage.className = 'vstage ' + ((V.cmp && V.diff) ? 'dark' : V.bg);
   }
-  function vBuild() {
+  function vBuild(keep) {
+    var ks = V.s, ktx = V.tx, kty = V.ty;
     vContent.textContent = '';
     var base = V.view === 'orig' ? S.src : S.result;
     if (!base) return;
@@ -1106,7 +1258,7 @@ if (typeof module !== 'undefined') {
       vContent.appendChild(vCanvasCopy(base));
     }
     vCmpUi();
-    vFit();
+    if (keep) { V.s = ks; V.tx = ktx; V.ty = kty; vApply(); } else vFit();
   }
 
   function openViewer() {
